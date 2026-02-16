@@ -1,0 +1,35 @@
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.ipynb_checkpoints/
+*.csv
+*.json
+
+
+# Virtual env
+venv/
+.env
+.clude/
+
+# Data
+data/
+Preprocessed Data/combined_data.csv
+*.csv
+*.wav
+
+# Models
+models/
+*.pt
+*.pth
+*.h5
+
+# System files
+.DS_Store
+Thumbs.db
+# Ignore specific training script
+train_emotion_classifier_copy_T.py
+
+

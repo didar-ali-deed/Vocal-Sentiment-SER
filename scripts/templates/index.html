@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SER - Speech Emotion Recognition</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <!-- Header -->
+    <header>
+        <div class="header-inner">
+            <div class="logo">
+                <div class="logo-icon">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                        <line x1="12" y1="19" x2="12" y2="23"/>
+                        <line x1="8" y1="23" x2="16" y2="23"/>
+                    </svg>
+                </div>
+                <div>
+                    <h1>Speech Emotion Recognition</h1>
+                    <p class="subtitle">Wav2Vec2 Transformer with Attention Pooling</p>
+                </div>
+            </div>
+            <button id="themeToggle" class="theme-btn" aria-label="Toggle theme">
+                <svg class="icon-sun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                <svg class="icon-moon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            </button>
+        </div>
+    </header>
+
+    <main>
+        <!-- Two-column layout -->
+        <div class="grid-layout">
+            <!-- Left column: Upload -->
+            <section class="card upload-card">
+                <div class="card-header">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    <h2>Upload Audio</h2>
+                </div>
+
+                <div class="drop-zone" id="dropZone">
+                    <div class="drop-zone-content" id="dropZoneContent">
+                        <div class="drop-icon">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        </div>
+                        <p class="drop-text">Drag & drop your audio file here</p>
+                        <p class="drop-subtext">or click to browse</p>
+                        <div class="supported-formats">WAV, MP3, FLAC, OGG (max 10MB)</div>
+                    </div>
+                    <input type="file" id="audioFile" accept=".wav,.mp3,.flac,.ogg" hidden>
+                </div>
+
+                <!-- File info (shown after file selected) -->
+                <div id="fileInfo" class="file-info hidden">
+                    <div class="file-icon">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                    </div>
+                    <div class="file-details">
+                        <span id="fileName" class="file-name"></span>
+                        <span id="fileSize" class="file-size"></span>
+                    </div>
+                    <button id="clearFile" class="clear-btn" aria-label="Remove file">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                </div>
+
+                <!-- Audio preview -->
+                <audio id="audioPreview" controls class="hidden"></audio>
+                <canvas id="waveformCanvas" class="hidden"></canvas>
+
+                <button id="predictButton" class="btn-primary" onclick="predictEmotion()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                    Analyze Emotion
+                </button>
+
+                <!-- Progress -->
+                <div id="progressIndicator" class="progress-bar hidden">
+                    <div class="progress-track">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <p id="progressText" class="progress-text">Processing...</p>
+                </div>
+            </section>
+
+            <!-- Right column: Result -->
+            <section class="card result-card">
+                <div class="card-header">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                    <h2>Result</h2>
+                </div>
+
+                <div class="result-display" id="resultDisplay">
+                    <div class="result-placeholder" id="resultPlaceholder">
+                        <div class="placeholder-icon">
+                            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" opacity="0.3"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+                        </div>
+                        <p>Upload an audio file to see results</p>
+                    </div>
+
+                    <div class="result-content hidden" id="resultContent">
+                        <div class="emotion-badge" id="emotionBadge">
+                            <span class="emotion-emoji" id="emoji"></span>
+                            <div class="emotion-info">
+                                <span class="emotion-label" id="emotionLabel"></span>
+                                <span class="emotion-caption" id="caption"></span>
+                            </div>
+                        </div>
+
+                        <div class="confidence-meter">
+                            <div class="confidence-header">
+                                <span>Confidence</span>
+                                <span id="confidenceValue" class="confidence-value"></span>
+                            </div>
+                            <div class="confidence-track">
+                                <div class="confidence-fill" id="confidenceFill"></div>
+                            </div>
+                            <p id="uncertaintyWarning" class="uncertainty-warning hidden">
+                                Low confidence - the audio may not contain clear emotional speech.
+                            </p>
+                        </div>
+
+                        <div class="chart-container">
+                            <h3>Emotion Probabilities</h3>
+                            <canvas id="probabilitiesChart"></canvas>
+                        </div>
+
+                        <div class="timing-info" id="timingInfo">
+                            <span id="processingTime"></span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- History table -->
+        <section class="card history-card">
+            <div class="card-header">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                <h2>Prediction History</h2>
+            </div>
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>File</th>
+                            <th>Emotion</th>
+                            <th>Confidence</th>
+                            <th>Time</th>
+                        </tr>
+                    </thead>
+                    <tbody id="predictionsBody">
+                        <tr><td colspan="4" class="empty-state">No predictions yet</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>Speech Emotion Recognition &copy; 2025 &mdash; Powered by Wav2Vec2 + PyTorch</p>
+    </footer>
+
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
