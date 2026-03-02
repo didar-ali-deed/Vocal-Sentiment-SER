@@ -17,8 +17,8 @@ __pycache__/
 
 
 # Data
-data/
-Preprocessed Data/combined_data.csv
+data/**/*.wav
+
 *.csv
 *.wav
 
