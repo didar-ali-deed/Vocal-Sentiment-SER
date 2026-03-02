@@ -10,9 +10,11 @@ __pycache__/
 
 
 # Virtual env
-venv/
+.venv/
 .env
-.clude/
+.claude/
+
+
 
 # Data
 data/

@@ -631,6 +631,10 @@ tbody tr:hover {
     background: var(--success);
 }
 
+.toast.warning {
+    background: var(--warning);
+}
+
 /* ==================== Footer ==================== */
 footer {
     text-align: center;

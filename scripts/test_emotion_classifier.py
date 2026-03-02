@@ -38,56 +38,54 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 
 
 # ==================== Model Architecture (must match training) ====================
-class AttentionPooling(nn.Module):
-    """Learns which time frames are most important for classification."""
-    def __init__(self, hidden_dim):
+class TransformerSERHead(nn.Module):
+    """
+    Must match train_emotion_classifier.py exactly.
+    Architecture params are loaded from model_info.json.
+    """
+
+    def __init__(self, input_dim=768, d_model=256, num_heads=8,
+                 num_layers=2, dim_ff=512, num_classes=8, dropout=0.25):
         super().__init__()
-        self.attention = nn.Sequential(
-            nn.Linear(hidden_dim, 128),
-            nn.Tanh(),
-            nn.Linear(128, 1)
+        self.input_proj = nn.Linear(input_dim, d_model)
+        self.input_norm = nn.LayerNorm(d_model)
+        self.input_drop = nn.Dropout(dropout)
+
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, d_model))
+        nn.init.trunc_normal_(self.cls_token, std=0.02)
+
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, nhead=num_heads, dim_feedforward=dim_ff,
+            dropout=dropout, activation='gelu', batch_first=True, norm_first=True,
         )
-
-    def forward(self, x):
-        # x: [batch, time, hidden]
-        attn_weights = self.attention(x).squeeze(-1)  # [batch, time]
-        attn_weights = F.softmax(attn_weights, dim=-1)
-        pooled = torch.bmm(attn_weights.unsqueeze(1), x).squeeze(1)  # [batch, hidden]
-        return pooled
-
-
-class EmotionClassifier(nn.Module):
-    """
-    Attention pooling + classifier trained on cached Wav2Vec2 hidden states.
-    Input: [batch, time_steps, 768] hidden states
-    Output: [batch, num_classes] logits
-    """
-    def __init__(self, hidden_dim=768, num_classes=8):
-        super().__init__()
-        self.attention_pool = AttentionPooling(hidden_dim)
-        self.layer_norm = nn.LayerNorm(hidden_dim)
+        self.transformer = nn.TransformerEncoder(
+            encoder_layer, num_layers=num_layers, norm=nn.LayerNorm(d_model),
+        )
+        self.cls_drop = nn.Dropout(dropout)
         self.classifier = nn.Sequential(
-            nn.Linear(hidden_dim, 256),
-            nn.BatchNorm1d(256),
+            nn.Linear(d_model, d_model // 2),
             nn.GELU(),
-            nn.Dropout(0.4),
-            nn.Linear(256, 128),
-            nn.BatchNorm1d(128),
-            nn.GELU(),
-            nn.Dropout(0.3),
-            nn.Linear(128, 64),
-            nn.BatchNorm1d(64),
-            nn.GELU(),
-            nn.Dropout(0.2),
-            nn.Linear(64, num_classes)
+            nn.Dropout(dropout * 0.5),
+            nn.Linear(d_model // 2, num_classes),
         )
 
-    def forward(self, hidden_states):
-        # hidden_states: [batch, time, 768]
-        pooled = self.attention_pool(hidden_states)  # [batch, 768]
-        pooled = self.layer_norm(pooled)
-        logits = self.classifier(pooled)
-        return logits
+    def forward(self, x, src_key_padding_mask=None):
+        B = x.size(0)
+        x = self.input_proj(x)
+        x = self.input_norm(x)
+        x = self.input_drop(x)
+
+        cls = self.cls_token.expand(B, -1, -1)
+        x = torch.cat([cls, x], dim=1)
+
+        if src_key_padding_mask is not None:
+            cls_mask = torch.zeros(B, 1, dtype=torch.bool, device=x.device)
+            src_key_padding_mask = torch.cat([cls_mask, src_key_padding_mask], dim=1)
+
+        x = self.transformer(x, src_key_padding_mask=src_key_padding_mask)
+        cls_out = x[:, 0]
+        cls_out = self.cls_drop(cls_out)
+        return self.classifier(cls_out)
 
 
 # ==================== Load Test Data ====================
@@ -104,32 +102,42 @@ logging.info(f"Test samples: {len(test_features)} | Classes: {num_classes} -> {l
 with open(MODEL_INFO_PATH, "r") as f:
     model_info = json.load(f)
 
-# Convert to tensors and pad to same length
-logging.info("Converting features to tensors...")
-# Find max sequence length
+# Pad variable-length features and build padding masks
+logging.info("Padding features and building masks...")
 max_len = max(f.shape[0] for f in test_features)
 logging.info(f"Max sequence length: {max_len}")
 
-# Pad all features to max_len
-padded_features = []
+padded_features, padding_masks = [], []
 for f in test_features:
-    feature_tensor = torch.tensor(f, dtype=torch.float32)
-    if feature_tensor.shape[0] < max_len:
-        # Pad with zeros
-        padding = torch.zeros(max_len - feature_tensor.shape[0], feature_tensor.shape[1])
-        feature_tensor = torch.cat([feature_tensor, padding], dim=0)
-    padded_features.append(feature_tensor)
+    t = torch.tensor(f, dtype=torch.float32)
+    T = t.shape[0]
+    mask = torch.ones(max_len, dtype=torch.bool)    # True = padding
+    if T < max_len:
+        pad = torch.zeros(max_len - T, t.shape[1])
+        t = torch.cat([t, pad], dim=0)
+    mask[:T] = False    # real data
+    padded_features.append(t)
+    padding_masks.append(mask)
 
 test_features_tensor = torch.stack(padded_features)
-test_labels_tensor = torch.tensor(test_labels, dtype=torch.long)
+test_masks_tensor    = torch.stack(padding_masks)
+test_labels_tensor   = torch.tensor(test_labels, dtype=torch.long)
 
-# Create dataset and loader using cached features
-test_dataset = TensorDataset(test_features_tensor, test_labels_tensor)
-test_loader = DataLoader(test_dataset, batch_size=8, shuffle=False)
+from torch.utils.data import TensorDataset
+test_dataset = TensorDataset(test_features_tensor, test_labels_tensor, test_masks_tensor)
+test_loader  = DataLoader(test_dataset, batch_size=8, shuffle=False)
 
 # ==================== Load Model ====================
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = EmotionClassifier(hidden_dim=768, num_classes=num_classes).to(device)
+model = TransformerSERHead(
+    input_dim=768,
+    d_model=model_info.get("d_model", 256),
+    num_heads=model_info.get("num_heads", 8),
+    num_layers=model_info.get("num_layers", 2),
+    dim_ff=model_info.get("dim_ff", 512),
+    num_classes=num_classes,
+    dropout=model_info.get("dropout", 0.25),
+).to(device)
 model.load_state_dict(torch.load(MODEL_PATH, map_location=device, weights_only=False))
 model.eval()
 logging.info(f"Model loaded from: {MODEL_PATH} (device: {device})")
@@ -139,11 +147,13 @@ y_true, y_pred, all_probs = [], [], []
 logging.info("Running evaluation...")
 
 with torch.no_grad():
-    for features, labels in tqdm(test_loader, desc="Evaluating"):
-        features, labels = features.to(device), labels.to(device)
-        outputs = model(features)
-        probs = torch.softmax(outputs, dim=1)
-        preds = torch.argmax(outputs, dim=1)
+    for features, labels, masks in tqdm(test_loader, desc="Evaluating"):
+        features = features.to(device)
+        labels   = labels.to(device)
+        masks    = masks.to(device)
+        outputs  = model(features, src_key_padding_mask=masks)
+        probs    = torch.softmax(outputs, dim=1)
+        preds    = torch.argmax(outputs, dim=1)
         y_true.extend(labels.cpu().numpy())
         y_pred.extend(preds.cpu().numpy())
         all_probs.extend(probs.cpu().numpy())

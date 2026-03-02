@@ -3,7 +3,9 @@
 
 from flask import Flask, request, render_template, jsonify
 from pathlib import Path
+from werkzeug.utils import secure_filename
 import os
+import uuid
 import librosa
 import torch
 import torch.nn as nn
@@ -22,7 +24,7 @@ logger = logging.getLogger(__name__)
 # ==================== Configuration ====================
 CONFIDENCE_THRESHOLD = 0.40
 SUPPORTED_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg"}
-MAX_AUDIO_DURATION = 10  # seconds
+MAX_AUDIO_DURATION = 5   # seconds — must match MAX_AUDIO_LEN in training (5s)
 TARGET_SR = 16000
 
 # ==================== Paths ====================
@@ -58,71 +60,80 @@ logger.info(f"Loaded {num_classes} emotion classes: {list(label_names)}")
 
 
 # ==================== Model Architecture (must match training) ====================
-class AttentionPooling(nn.Module):
-    """Learns which time frames are most important for classification."""
-    def __init__(self, hidden_dim):
+class TransformerSERHead(nn.Module):
+    """
+    Must exactly match train_emotion_classifier.py.
+    Architecture hyper-params are read from model_info.json at startup.
+    Uses LayerNorm only — no BatchNorm — so it works correctly at batch size 1.
+    """
+
+    def __init__(self, input_dim=768, d_model=256, num_heads=8,
+                 num_layers=2, dim_ff=512, num_classes=8, dropout=0.25):
         super().__init__()
-        self.attention = nn.Sequential(
-            nn.Linear(hidden_dim, 128),
-            nn.Tanh(),
-            nn.Linear(128, 1)
+        self.input_proj = nn.Linear(input_dim, d_model)
+        self.input_norm = nn.LayerNorm(d_model)
+        self.input_drop = nn.Dropout(dropout)
+
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, d_model))
+        nn.init.trunc_normal_(self.cls_token, std=0.02)
+
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, nhead=num_heads, dim_feedforward=dim_ff,
+            dropout=dropout, activation='gelu', batch_first=True, norm_first=True,
         )
-
-    def forward(self, x):
-        # x: [batch, time, hidden]
-        attn_weights = self.attention(x).squeeze(-1)  # [batch, time]
-        attn_weights = F.softmax(attn_weights, dim=-1)
-        pooled = torch.bmm(attn_weights.unsqueeze(1), x).squeeze(1)  # [batch, hidden]
-        return pooled
-
-
-class EmotionClassifier(nn.Module):
-    """
-    Attention pooling + classifier trained on cached Wav2Vec2 hidden states.
-    Input: [batch, time_steps, 768] hidden states
-    Output: [batch, num_classes] logits
-    """
-    def __init__(self, hidden_dim=768, num_classes=8):
-        super().__init__()
-        self.attention_pool = AttentionPooling(hidden_dim)
-        self.layer_norm = nn.LayerNorm(hidden_dim)
+        self.transformer = nn.TransformerEncoder(
+            encoder_layer, num_layers=num_layers, norm=nn.LayerNorm(d_model),
+        )
+        self.cls_drop = nn.Dropout(dropout)
         self.classifier = nn.Sequential(
-            nn.Linear(hidden_dim, 256),
-            nn.BatchNorm1d(256),
+            nn.Linear(d_model, d_model // 2),
             nn.GELU(),
-            nn.Dropout(0.4),
-            nn.Linear(256, 128),
-            nn.BatchNorm1d(128),
-            nn.GELU(),
-            nn.Dropout(0.3),
-            nn.Linear(128, 64),
-            nn.BatchNorm1d(64),
-            nn.GELU(),
-            nn.Dropout(0.2),
-            nn.Linear(64, num_classes)
+            nn.Dropout(dropout * 0.5),
+            nn.Linear(d_model // 2, num_classes),
         )
 
-    def forward(self, hidden_states):
-        # hidden_states: [batch, time, 768]
-        pooled = self.attention_pool(hidden_states)  # [batch, 768]
-        pooled = self.layer_norm(pooled)
-        logits = self.classifier(pooled)
-        return logits
+    def forward(self, x, src_key_padding_mask=None):
+        B = x.size(0)
+        x = self.input_proj(x)
+        x = self.input_norm(x)
+        x = self.input_drop(x)
+
+        cls = self.cls_token.expand(B, -1, -1)
+        x = torch.cat([cls, x], dim=1)
+
+        if src_key_padding_mask is not None:
+            cls_mask = torch.zeros(B, 1, dtype=torch.bool, device=x.device)
+            src_key_padding_mask = torch.cat([cls_mask, src_key_padding_mask], dim=1)
+
+        x = self.transformer(x, src_key_padding_mask=src_key_padding_mask)
+        cls_out = x[:, 0]
+        cls_out = self.cls_drop(cls_out)
+        return self.classifier(cls_out)
 
 
 # ==================== Load Models ====================
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Load Wav2Vec2 for feature extraction (frozen)
+# Load Wav2Vec2 for feature extraction (frozen backbone)
 logger.info("Loading Wav2Vec2 feature extractor...")
 wav2vec2_processor = Wav2Vec2Processor.from_pretrained("facebook/wav2vec2-base")
-wav2vec2_model = Wav2Vec2Model.from_pretrained("facebook/wav2vec2-base").to(device)
+wav2vec2_model     = Wav2Vec2Model.from_pretrained("facebook/wav2vec2-base").to(device)
 wav2vec2_model.eval()
 
-# Load trained emotion classifier
+# Load trained TransformerSERHead — read arch params from model_info.json
 logger.info("Loading emotion classifier...")
-emotion_classifier = EmotionClassifier(hidden_dim=768, num_classes=num_classes).to(device)
-emotion_classifier.load_state_dict(torch.load(MODEL_PATH, map_location=device, weights_only=False))
+emotion_classifier = TransformerSERHead(
+    input_dim=768,
+    d_model=model_info.get("d_model", 256),
+    num_heads=model_info.get("num_heads", 8),
+    num_layers=model_info.get("num_layers", 2),
+    dim_ff=model_info.get("dim_ff", 512),
+    num_classes=num_classes,
+    dropout=model_info.get("dropout", 0.25),
+).to(device)
+emotion_classifier.load_state_dict(
+    torch.load(MODEL_PATH, map_location=device, weights_only=False)
+)
 emotion_classifier.eval()
 
 logger.info(f"Models loaded on {device}")
@@ -154,21 +165,25 @@ def preprocess_audio(file_path, target_sr=TARGET_SR):
 # ==================== Prediction ====================
 def predict_emotion(file_path):
     """
-    Two-stage pipeline:
-    1. Extract Wav2Vec2 features (frozen backbone)
-    2. Classify using trained classifier head
+    Two-stage pipeline matching the training pipeline exactly:
+      1. Preprocess audio → Wav2Vec2Processor (zero-mean / unit-var normalisation)
+      2. Extract frozen Wav2Vec2 hidden states
+      3. Classify via TransformerSERHead (no padding mask needed for single sample)
     """
-    # Load and preprocess audio
     audio = preprocess_audio(file_path)
-    audio_tensor = torch.tensor(audio, dtype=torch.float32).unsqueeze(0).to(device)
+
+    # Use the processor for the same normalisation applied during training
+    inputs = wav2vec2_processor(
+        audio, sampling_rate=TARGET_SR, return_tensors="pt"
+    )
+    input_values = inputs.input_values.to(device)   # [1, T]
 
     with torch.no_grad():
-        # Stage 1: Extract Wav2Vec2 features
-        wav2vec2_outputs = wav2vec2_model(audio_tensor)
-        hidden_states = wav2vec2_outputs.last_hidden_state  # [1, time, 768]
-        
-        # Stage 2: Classify with trained classifier
-        logits = emotion_classifier(hidden_states)
+        # Stage 1: frozen Wav2Vec2 feature extraction
+        hidden_states = wav2vec2_model(input_values).last_hidden_state  # [1, T, 768]
+
+        # Stage 2: transformer classifier — single sample, no padding needed
+        logits = emotion_classifier(hidden_states, src_key_padding_mask=None)
         probabilities = F.softmax(logits, dim=1).cpu().numpy()[0]
         predicted_idx = int(torch.argmax(logits, dim=1).cpu().numpy()[0])
 
@@ -221,22 +236,27 @@ def upload():
     if file.filename == "":
         return jsonify({"status": "error", "message": "No file selected"}), 400
 
-    ext = os.path.splitext(file.filename)[1].lower()
+    safe_name = secure_filename(file.filename)
+    if not safe_name:
+        return jsonify({"status": "error", "message": "Invalid filename"}), 400
+
+    ext = os.path.splitext(safe_name)[1].lower()
     if ext not in SUPPORTED_EXTENSIONS:
         return jsonify({
             "status": "error",
             "message": f"Invalid format. Allowed: {', '.join(SUPPORTED_EXTENSIONS)}"
         }), 400
 
-    temp_path = UPLOAD_FOLDER / file.filename
+    # Unique name prevents path-traversal and concurrent-upload collisions
+    temp_path = UPLOAD_FOLDER / f"{uuid.uuid4().hex}_{safe_name}"
     file.save(temp_path)
 
     try:
         emotion, probs, confidence, is_uncertain = predict_emotion(temp_path)
-        save_prediction(file.filename, emotion, probs, confidence, is_uncertain)
+        save_prediction(safe_name, emotion, probs, confidence, is_uncertain)
 
         logger.info(f"{'[UNCERTAIN] ' if is_uncertain else ''}"
-                    f"{file.filename} -> {emotion} ({confidence:.2%})")
+                    f"{safe_name} -> {emotion} ({confidence:.2%})")
 
         return jsonify({
             "status": "success",

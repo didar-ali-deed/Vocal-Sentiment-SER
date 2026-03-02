@@ -25,8 +25,10 @@ function showToast(message, type = 'error') {
 
 // ==================== Theme ====================
 function initTheme() {
-    const saved = localStorage.getItem('theme') || 'light';
-    document.documentElement.setAttribute('data-theme', saved);
+    const saved = localStorage.getItem('theme');
+    // Respect OS dark-mode preference when no saved choice exists
+    const preferred = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', saved || preferred);
 }
 
 function toggleTheme() {
@@ -34,9 +36,13 @@ function toggleTheme() {
     const next = current === 'dark' ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', next);
     localStorage.setItem('theme', next);
+    // Re-render chart with updated theme colors
+    if (lastProbabilities) displayChart(lastProbabilities);
 }
 
 // ==================== File Handling ====================
+let currentBlobUrl = null;  // track so we can revoke and avoid memory leaks
+
 function formatFileSize(bytes) {
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
@@ -58,8 +64,12 @@ function handleFileSelected(file) {
     fileInfo.classList.remove('hidden');
     dropZone.classList.add('hidden');
 
-    // Show audio preview
-    audioPreview.src = URL.createObjectURL(file);
+    // Revoke any previous blob URL before creating a new one
+    if (currentBlobUrl) {
+        URL.revokeObjectURL(currentBlobUrl);
+    }
+    currentBlobUrl = URL.createObjectURL(file);
+    audioPreview.src = currentBlobUrl;
     audioPreview.classList.remove('hidden');
 
     // Draw waveform
@@ -78,6 +88,11 @@ function clearFile() {
     fileInfo.classList.add('hidden');
     dropZone.classList.remove('hidden');
     audioPreview.classList.add('hidden');
+    // Revoke and clear the blob URL to free memory
+    if (currentBlobUrl) {
+        URL.revokeObjectURL(currentBlobUrl);
+        currentBlobUrl = null;
+    }
     audioPreview.src = '';
     waveformCanvas.classList.add('hidden');
 }
@@ -138,7 +153,7 @@ function drawWaveform(file) {
 
             audioContext.close();
         }).catch(() => {
-            // Silently fail on decode error
+            audioContext.close(); // always close to avoid AudioContext leak
         });
     };
     reader.readAsArrayBuffer(file);
@@ -146,8 +161,10 @@ function drawWaveform(file) {
 
 // ==================== Chart ====================
 let probabilityChart = null;
+let lastProbabilities = null;  // kept so chart can be re-themed on theme toggle
 
 function displayChart(probabilities) {
+    lastProbabilities = probabilities;
     const ctx = document.getElementById('probabilitiesChart');
     if (!ctx || !window.Chart) return;
 
@@ -274,6 +291,12 @@ async function predictEmotion() {
         // Show results
         resultContent.classList.remove('hidden');
 
+        // Brief success feedback
+        showToast(
+            `Detected: ${predicted_emotion} (${confPct}%)`,
+            is_uncertain ? 'warning' : 'success'
+        );
+
         // Refresh history
         updateHistory();
 
@@ -331,6 +354,14 @@ function setupDragAndDrop() {
     const fileInput = document.getElementById('audioFile');
 
     dropZone.addEventListener('click', () => fileInput.click());
+
+    // Keyboard: activate on Enter or Space for accessibility
+    dropZone.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            fileInput.click();
+        }
+    });
 
     dropZone.addEventListener('dragover', (e) => {
         e.preventDefault();
