@@ -1,198 +1,145 @@
-# app.py - Speech Emotion Recognition Web App
-# Uses classifier trained on cached Wav2Vec2 features
+"""Flask inference app for the paper-linked speech emotion model."""
 
+from functools import lru_cache
 from flask import Flask, request, render_template, jsonify
 from pathlib import Path
-from werkzeug.utils import secure_filename
-import os
-import uuid
-import librosa
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
-from transformers import Wav2Vec2Processor, Wav2Vec2Model
 import json
-import time
 import logging
+import os
+import tempfile
+import threading
+import time
+from uuid import uuid4
 
-app = Flask(__name__)
+from werkzeug.utils import secure_filename
+import librosa
+import numpy as np
+import torch
+import torch.nn.functional as F
+from transformers import Wav2Vec2Processor, Wav2Vec2Model
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+try:
+    from model import load_artifacts
+except ImportError:
+    from scripts.model import load_artifacts
 
-# ==================== Configuration ====================
-CONFIDENCE_THRESHOLD = 0.40
-SUPPORTED_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg"}
-MAX_AUDIO_DURATION = 5   # seconds — must match MAX_AUDIO_LEN in training (5s)
-TARGET_SR = 16000
-
-# ==================== Paths ====================
-BASE_DIR = Path(__file__).parent.parent
+BASE_DIR = Path(__file__).resolve().parent.parent
 MODEL_DIR = BASE_DIR / "models" / "emotion_classifier"
-MODEL_PATH = MODEL_DIR / "emotion_classifier.pth"
-LABEL_NAMES_PATH = MODEL_DIR / "label_names.npy"
-MODEL_INFO_PATH = MODEL_DIR / "model_info.json"
-
 UPLOAD_FOLDER = BASE_DIR / "deployment" / "uploads"
 RESULTS_DIR = BASE_DIR / "results"
 PREDICTIONS_FILE = RESULTS_DIR / "inference_predictions.json"
 
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(RESULTS_DIR, exist_ok=True)
+CONFIDENCE_THRESHOLD = 0.40
+SUPPORTED_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg"}
+TARGET_SAMPLE_RATE = 16_000
+MAX_AUDIO_DURATION = 30
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10MB
+UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-# ==================== Check Required Files ====================
-required = [MODEL_PATH, LABEL_NAMES_PATH, MODEL_INFO_PATH]
-missing = [str(f) for f in required if not f.exists()]
-if missing:
-    raise FileNotFoundError(f"Missing required files: {missing}")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
+history_lock = threading.Lock()
 
-# ==================== Load Model Info & Labels ====================
-label_names = np.load(LABEL_NAMES_PATH, allow_pickle=True)
-with open(MODEL_INFO_PATH, "r") as f:
-    model_info = json.load(f)
-
-num_classes = len(label_names)
-logger.info(f"Loaded {num_classes} emotion classes: {list(label_names)}")
+app = Flask(__name__)
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
 
 
-# ==================== Model Architecture (must match training) ====================
-class TransformerSERHead(nn.Module):
-    """
-    Must exactly match train_emotion_classifier.py.
-    Architecture hyper-params are read from model_info.json at startup.
-    Uses LayerNorm only — no BatchNorm — so it works correctly at batch size 1.
-    """
+@lru_cache(maxsize=1)
+def get_runtime():
+    """Load large model assets once, on the first request that needs them."""
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logger.info("Loading Wav2Vec2 and classifier on %s", device)
+    processor = Wav2Vec2Processor.from_pretrained("facebook/wav2vec2-base")
+    wav2vec_model = Wav2Vec2Model.from_pretrained("facebook/wav2vec2-base").to(device)
+    wav2vec_model.eval()
 
-    def __init__(self, input_dim=768, d_model=256, num_heads=8,
-                 num_layers=2, dim_ff=512, num_classes=8, dropout=0.25):
-        super().__init__()
-        self.input_proj = nn.Linear(input_dim, d_model)
-        self.input_norm = nn.LayerNorm(d_model)
-        self.input_drop = nn.Dropout(dropout)
-
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, d_model))
-        nn.init.trunc_normal_(self.cls_token, std=0.02)
-
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=d_model, nhead=num_heads, dim_feedforward=dim_ff,
-            dropout=dropout, activation='gelu', batch_first=True, norm_first=True,
+    classifier, label_names, model_info, scaler, input_dim = load_artifacts(
+        MODEL_DIR, device
+    )
+    if input_dim != scaler.n_features_in_:
+        raise ValueError(
+            f"Artifact mismatch: model expects {input_dim} features, "
+            f"but scaler expects {scaler.n_features_in_}."
         )
-        self.transformer = nn.TransformerEncoder(
-            encoder_layer, num_layers=num_layers, norm=nn.LayerNorm(d_model),
-        )
-        self.cls_drop = nn.Dropout(dropout)
-        self.classifier = nn.Sequential(
-            nn.Linear(d_model, d_model // 2),
-            nn.GELU(),
-            nn.Dropout(dropout * 0.5),
-            nn.Linear(d_model // 2, num_classes),
-        )
-
-    def forward(self, x, src_key_padding_mask=None):
-        B = x.size(0)
-        x = self.input_proj(x)
-        x = self.input_norm(x)
-        x = self.input_drop(x)
-
-        cls = self.cls_token.expand(B, -1, -1)
-        x = torch.cat([cls, x], dim=1)
-
-        if src_key_padding_mask is not None:
-            cls_mask = torch.zeros(B, 1, dtype=torch.bool, device=x.device)
-            src_key_padding_mask = torch.cat([cls_mask, src_key_padding_mask], dim=1)
-
-        x = self.transformer(x, src_key_padding_mask=src_key_padding_mask)
-        cls_out = x[:, 0]
-        cls_out = self.cls_drop(cls_out)
-        return self.classifier(cls_out)
-
-
-# ==================== Load Models ====================
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# Load Wav2Vec2 for feature extraction (frozen backbone)
-logger.info("Loading Wav2Vec2 feature extractor...")
-wav2vec2_processor = Wav2Vec2Processor.from_pretrained("facebook/wav2vec2-base")
-wav2vec2_model     = Wav2Vec2Model.from_pretrained("facebook/wav2vec2-base").to(device)
-wav2vec2_model.eval()
-
-# Load trained TransformerSERHead — read arch params from model_info.json
-logger.info("Loading emotion classifier...")
-emotion_classifier = TransformerSERHead(
-    input_dim=768,
-    d_model=model_info.get("d_model", 256),
-    num_heads=model_info.get("num_heads", 8),
-    num_layers=model_info.get("num_layers", 2),
-    dim_ff=model_info.get("dim_ff", 512),
-    num_classes=num_classes,
-    dropout=model_info.get("dropout", 0.25),
-).to(device)
-emotion_classifier.load_state_dict(
-    torch.load(MODEL_PATH, map_location=device, weights_only=False)
-)
-emotion_classifier.eval()
-
-logger.info(f"Models loaded on {device}")
-logger.info(f"Emotions: {list(label_names)}")
+    logger.info("Loaded classes: %s", list(label_names))
+    return {
+        "device": device,
+        "processor": processor,
+        "wav2vec_model": wav2vec_model,
+        "classifier": classifier,
+        "label_names": label_names,
+        "model_info": model_info,
+        "scaler": scaler,
+    }
 
 
 # ==================== Audio Preprocessing ====================
-def preprocess_audio(file_path, target_sr=TARGET_SR):
-    """Load, normalize, and trim audio. Must match training pipeline."""
-    audio, sr = librosa.load(file_path, sr=target_sr)
-
+def preprocess_audio(file_path, target_sr=TARGET_SAMPLE_RATE):
+    """Load, normalize, trim, and validate an audio file."""
+    audio, _ = librosa.load(file_path, sr=target_sr, mono=True)
     if len(audio) < target_sr * 0.1:
-        raise ValueError("Audio is too short (< 0.1s).")
+        raise ValueError("Audio is too short; upload a file longer than 0.1 seconds.")
 
     duration = len(audio) / target_sr
     if duration > MAX_AUDIO_DURATION:
-        logger.warning(f"Audio too long ({duration:.1f}s), truncating to {MAX_AUDIO_DURATION}s")
-        audio = audio[:target_sr * MAX_AUDIO_DURATION]
+        raise ValueError(
+            f"Audio is too long ({duration:.1f}s). Maximum duration is "
+            f"{MAX_AUDIO_DURATION} seconds."
+        )
 
     audio = librosa.util.normalize(audio)
     audio, _ = librosa.effects.trim(audio, top_db=25)
-
     if len(audio) < target_sr * 0.1:
-        raise ValueError("Audio is mostly silence.")
-
+        raise ValueError("Audio is mostly silence; upload a recording with audible speech.")
     return audio
 
 
-# ==================== Prediction ====================
-def predict_emotion(file_path):
-    """
-    Two-stage pipeline matching the training pipeline exactly:
-      1. Preprocess audio → Wav2Vec2Processor (zero-mean / unit-var normalisation)
-      2. Extract frozen Wav2Vec2 hidden states
-      3. Classify via TransformerSERHead (no padding mask needed for single sample)
-    """
+# ==================== Feature Extraction ====================
+def extract_wav2vec_features(file_path):
+    """Extract Wav2Vec2 features with preprocessing matching training pipeline."""
+    runtime = get_runtime()
     audio = preprocess_audio(file_path)
-
-    # Use the processor for the same normalisation applied during training
-    inputs = wav2vec2_processor(
-        audio, sampling_rate=TARGET_SR, return_tensors="pt"
+    inputs = runtime["processor"](
+        audio, sampling_rate=TARGET_SAMPLE_RATE, return_tensors="pt", padding=True
     )
-    input_values = inputs.input_values.to(device)   # [1, T]
+    inputs = {key: value.to(runtime["device"]) for key, value in inputs.items()}
 
-    with torch.no_grad():
-        # Stage 1: frozen Wav2Vec2 feature extraction
-        hidden_states = wav2vec2_model(input_values).last_hidden_state  # [1, T, 768]
+    with torch.inference_mode():
+        hidden = runtime["wav2vec_model"](**inputs).last_hidden_state
+        attention_mask = inputs.get("attention_mask")
+        if attention_mask is not None:
+            feature_mask = runtime["wav2vec_model"]._get_feature_vector_attention_mask(
+                hidden.shape[1], attention_mask
+            ).unsqueeze(-1).to(hidden.dtype)
+            hidden = (hidden * feature_mask).sum(dim=1) / feature_mask.sum(dim=1).clamp_min(1)
+        else:
+            hidden = hidden.mean(dim=1)
 
-        # Stage 2: transformer classifier — single sample, no padding needed
-        logits = emotion_classifier(hidden_states, src_key_padding_mask=None)
-        probabilities = F.softmax(logits, dim=1).cpu().numpy()[0]
-        predicted_idx = int(torch.argmax(logits, dim=1).cpu().numpy()[0])
+    features = hidden.squeeze(0).cpu().numpy()
+    return runtime["scaler"].transform(features.reshape(1, -1)).squeeze(0)
 
+
+# ==================== Prediction ====================
+def predict_emotion(features):
+    """Predict emotion from features, with confidence threshold."""
+    runtime = get_runtime()
+    tensor = torch.as_tensor(features, dtype=torch.float32)
+    tensor = tensor.unsqueeze(0).to(runtime["device"])
+    with torch.inference_mode():
+        probabilities = F.softmax(runtime["classifier"](tensor), dim=1).cpu().numpy()[0]
+
+    label_names = runtime["label_names"]
+    predicted_idx = int(np.argmax(probabilities))
     predicted_emotion = str(label_names[predicted_idx])
     confidence = float(probabilities[predicted_idx])
-    prob_dict = {str(label_names[i]): float(probabilities[i]) for i in range(len(label_names))}
-    is_uncertain = confidence < CONFIDENCE_THRESHOLD
-
-    return predicted_emotion, prob_dict, confidence, is_uncertain
+    prob_dict = {
+        str(label_names[index]): float(probabilities[index])
+        for index in range(len(label_names))
+    }
+    return predicted_emotion, prob_dict, confidence, confidence < CONFIDENCE_THRESHOLD
 
 
 # ==================== Save Prediction History ====================
@@ -206,57 +153,81 @@ def save_prediction(filename, emotion, probabilities, confidence, is_uncertain=F
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
     }
 
-    history = []
-    if PREDICTIONS_FILE.exists():
+    with history_lock:
+        history = []
+        if PREDICTIONS_FILE.exists():
+            try:
+                history = json.loads(PREDICTIONS_FILE.read_text(encoding="utf-8"))
+                if not isinstance(history, list):
+                    history = []
+            except (json.JSONDecodeError, OSError):
+                history = []
+
+        history = (history + [entry])[-50:]
+        temporary_path = None
         try:
-            with open(PREDICTIONS_FILE, "r", encoding="utf-8") as f:
-                history = json.load(f)
-        except (json.JSONDecodeError, IOError):
-            history = []
-
-    history.append(entry)
-    history = history[-50:]
-
-    with open(PREDICTIONS_FILE, "w", encoding="utf-8") as f:
-        json.dump(history, f, indent=2)
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=RESULTS_DIR,
+                prefix="predictions-", suffix=".tmp", delete=False
+            ) as handle:
+                temporary_path = Path(handle.name)
+                json.dump(history, handle, indent=2)
+            os.replace(temporary_path, PREDICTIONS_FILE)
+        finally:
+            if temporary_path and temporary_path.exists():
+                temporary_path.unlink(missing_ok=True)
 
 
 # ==================== Routes ====================
+@app.errorhandler(413)
+def request_too_large(_error):
+    return jsonify({"status": "error", "message": "Maximum upload size is 10 MB."}), 413
+
+
+@app.errorhandler(FileNotFoundError)
+def model_not_ready(error):
+    logger.error("Model artifacts are not ready: %s", error)
+    return jsonify({
+        "status": "error",
+        "message": "Model artifacts are missing. Run the training script first.",
+    }), 503
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
 
 
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok", "service": "speech-emotion-recognition"})
+
+
 @app.route("/upload", methods=["POST"])
 def upload():
-    if "file" not in request.files:
-        return jsonify({"status": "error", "message": "No file uploaded"}), 400
+    file = request.files.get("file")
+    if file is None or not file.filename:
+        return jsonify({"status": "error", "message": "Please choose an audio file."}), 400
 
-    file = request.files["file"]
-    if file.filename == "":
-        return jsonify({"status": "error", "message": "No file selected"}), 400
+    original_filename = secure_filename(file.filename)
+    ext = Path(original_filename).suffix.lower()
+    if not original_filename or ext not in SUPPORTED_EXTENSIONS:
+        allowed = ", ".join(sorted(SUPPORTED_EXTENSIONS))
+        return jsonify({"status": "error", "message": f"Allowed formats: {allowed}"}), 400
 
-    safe_name = secure_filename(file.filename)
-    if not safe_name:
-        return jsonify({"status": "error", "message": "Invalid filename"}), 400
-
-    ext = os.path.splitext(safe_name)[1].lower()
-    if ext not in SUPPORTED_EXTENSIONS:
-        return jsonify({
-            "status": "error",
-            "message": f"Invalid format. Allowed: {', '.join(SUPPORTED_EXTENSIONS)}"
-        }), 400
-
-    # Unique name prevents path-traversal and concurrent-upload collisions
-    temp_path = UPLOAD_FOLDER / f"{uuid.uuid4().hex}_{safe_name}"
+    # Never use the browser-provided filename as a filesystem path.
+    temp_path = UPLOAD_FOLDER / f"{uuid4().hex}{ext}"
     file.save(temp_path)
 
     try:
-        emotion, probs, confidence, is_uncertain = predict_emotion(temp_path)
-        save_prediction(safe_name, emotion, probs, confidence, is_uncertain)
+        # Extract features -> predict
+        features = extract_wav2vec_features(temp_path)
+        emotion, probs, confidence, is_uncertain = predict_emotion(features)
 
-        logger.info(f"{'[UNCERTAIN] ' if is_uncertain else ''}"
-                    f"{safe_name} -> {emotion} ({confidence:.2%})")
+        # Save to history
+        save_prediction(original_filename, emotion, probs, confidence, is_uncertain)
+
+        logger.info("%s -> %s (%.2f%%)", original_filename, emotion, confidence * 100)
 
         return jsonify({
             "status": "success",
@@ -272,49 +243,47 @@ def upload():
         logger.warning(f"Validation error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 400
 
-    except Exception as e:
-        logger.error(f"Processing failed: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+    except FileNotFoundError:
+        raise
+
+    except Exception:
+        logger.exception("Processing failed for %s", original_filename)
+        return jsonify({
+            "status": "error",
+            "message": "Prediction failed. Check the server logs."
+        }), 500
 
     finally:
-        if temp_path.exists():
-            try:
-                os.remove(temp_path)
-            except OSError:
-                pass
+        temp_path.unlink(missing_ok=True)
 
 
 @app.route("/predictions")
 def get_predictions():
-    if PREDICTIONS_FILE.exists():
-        try:
-            with open(PREDICTIONS_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                return jsonify({"status": "success", "data": data[::-1]})
-        except (json.JSONDecodeError, IOError):
-            pass
-    return jsonify({"status": "success", "data": []})
+    try:
+        data = json.loads(PREDICTIONS_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, list):
+            data = []
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        data = []
+    return jsonify({"status": "success", "data": data[::-1]})
 
 
 @app.route("/model-info")
 def get_model_info():
+    """Return model metadata for the frontend."""
+    runtime = get_runtime()
     return jsonify({
         "status": "success",
         "data": {
-            "model_info": model_info,
+            "model_info": runtime["model_info"],
             "confidence_threshold": CONFIDENCE_THRESHOLD,
-            "supported_extensions": list(SUPPORTED_EXTENSIONS),
-            "device": str(device)
+            "supported_extensions": sorted(SUPPORTED_EXTENSIONS),
+            "device": str(runtime["device"]),
+            "has_scaler": True
         }
     })
 
 
 if __name__ == "__main__":
-    print("=" * 60)
-    print("Speech Emotion Recognition App")
-    print(f"Architecture: {model_info.get('architecture', 'Wav2Vec2 + Classifier')}")
-    print(f"Emotions: {list(label_names)}")
-    print(f"Device: {device}")
-    print(f"URL: http://127.0.0.1:5000")
-    print("=" * 60)
+    logger.info("Speech Emotion Recognition app: http://127.0.0.1:5000")
     app.run(debug=False, host="0.0.0.0", port=5000)
