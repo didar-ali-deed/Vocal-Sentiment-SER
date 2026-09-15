@@ -1,367 +1,322 @@
-// ==================== Constants ====================
-const EMOJI_MAP = {
-    angry: '😤', calm: '😌', disgust: '🤢', fear: '😨',
-    happy: '😄', neutral: '😐', surprise: '😲', sad: '😢'
+console.log('Loading script.js');
+
+const emojiMap = {
+    'angry': '😤',
+    'calm': '😌',
+    'disgust': '🤢',
+    'fear': '😨',
+    'happy': '😄',
+    'neutral': '😐',
+    'surprise': '😲',
+    'sad': '😢',
+    'unknown': '❓'
 };
 
-const CAPTION_MAP = {
-    angry: 'Feeling Angry', calm: 'Calm & Relaxed', disgust: 'Disgusted',
-    fear: 'Scared', happy: 'Happy!', neutral: 'Neutral',
-    surprise: 'Surprised!', sad: 'Feeling Sad'
+const captionMap = {
+    'angry': 'Feeling Angry!',
+    'calm': 'Calm & Relaxed.',
+    'disgust': 'Yuck, Disgusting!',
+    'fear': 'Scared Stiff!',
+    'happy': 'Over the Moon!',
+    'neutral': 'Keeping Neutral.',
+    'surprise': 'Surprised!',
+    'sad': 'Down in the Dumps.',
+    'unknown': 'Unknown Emotion.'
 };
 
-const EMOTION_COLORS = {
-    angry: '#ef4444', calm: '#10b981', disgust: '#a855f7', fear: '#3b82f6',
-    happy: '#22c55e', neutral: '#94a3b8', surprise: '#eab308', sad: '#f97316'
-};
-
-// ==================== Toast Notification ====================
-function showToast(message, type = 'error') {
-    const toast = document.getElementById('toast');
-    toast.textContent = message;
-    toast.className = `toast ${type} show`;
-    setTimeout(() => toast.classList.remove('show'), 4000);
-}
-
-// ==================== Theme ====================
-function initTheme() {
-    const saved = localStorage.getItem('theme');
-    // Respect OS dark-mode preference when no saved choice exists
-    const preferred = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-    document.documentElement.setAttribute('data-theme', saved || preferred);
+function showError(message, suggestion = '') {
+    console.error('Error:', message);
+    const errorDiv = document.createElement('div');
+    errorDiv.className = 'error-message';
+    errorDiv.innerHTML = `${message}${suggestion ? `<br><small>${suggestion}</small>` : ''}`;
+    document.body.appendChild(errorDiv);
+    setTimeout(() => errorDiv.remove(), 5000);
 }
 
 function toggleTheme() {
-    const current = document.documentElement.getAttribute('data-theme');
-    const next = current === 'dark' ? 'light' : 'dark';
-    document.documentElement.setAttribute('data-theme', next);
-    localStorage.setItem('theme', next);
-    // Re-render chart with updated theme colors
-    if (lastProbabilities) displayChart(lastProbabilities);
+    const body = document.body;
+    const themeToggle = document.getElementById('themeToggle');
+    body.classList.toggle('dark-theme');
+    const isDark = body.classList.contains('dark-theme');
+    themeToggle.querySelector('.theme-icon').textContent = isDark ? '☀️' : '🌙';
+    localStorage.setItem('theme', isDark ? 'dark' : 'light');
 }
 
-// ==================== File Handling ====================
-let currentBlobUrl = null;  // track so we can revoke and avoid memory leaks
-
-function formatFileSize(bytes) {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / 1048576).toFixed(1) + ' MB';
-}
-
-function handleFileSelected(file) {
-    if (!file) return;
-
-    const fileInfo = document.getElementById('fileInfo');
-    const fileName = document.getElementById('fileName');
-    const fileSize = document.getElementById('fileSize');
-    const dropZone = document.getElementById('dropZone');
-    const audioPreview = document.getElementById('audioPreview');
-    const waveformCanvas = document.getElementById('waveformCanvas');
-
-    fileName.textContent = file.name;
-    fileSize.textContent = formatFileSize(file.size);
-    fileInfo.classList.remove('hidden');
-    dropZone.classList.add('hidden');
-
-    // Revoke any previous blob URL before creating a new one
-    if (currentBlobUrl) {
-        URL.revokeObjectURL(currentBlobUrl);
-    }
-    currentBlobUrl = URL.createObjectURL(file);
-    audioPreview.src = currentBlobUrl;
-    audioPreview.classList.remove('hidden');
-
-    // Draw waveform
-    waveformCanvas.classList.remove('hidden');
-    drawWaveform(file);
-}
-
-function clearFile() {
-    const fileInput = document.getElementById('audioFile');
-    const fileInfo = document.getElementById('fileInfo');
-    const dropZone = document.getElementById('dropZone');
-    const audioPreview = document.getElementById('audioPreview');
-    const waveformCanvas = document.getElementById('waveformCanvas');
-
-    fileInput.value = '';
-    fileInfo.classList.add('hidden');
-    dropZone.classList.remove('hidden');
-    audioPreview.classList.add('hidden');
-    // Revoke and clear the blob URL to free memory
-    if (currentBlobUrl) {
-        URL.revokeObjectURL(currentBlobUrl);
-        currentBlobUrl = null;
-    }
-    audioPreview.src = '';
-    waveformCanvas.classList.add('hidden');
-}
-
-// ==================== Waveform ====================
-function drawWaveform(file) {
+function drawWaveform(audioBuffer) {
     const canvas = document.getElementById('waveformCanvas');
     const ctx = canvas.getContext('2d');
-
-    // Set actual pixel size
-    canvas.width = canvas.offsetWidth * 2;
-    canvas.height = canvas.offsetHeight * 2;
-    ctx.scale(2, 2);
-
-    const width = canvas.offsetWidth;
-    const height = canvas.offsetHeight;
-
-    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const width = canvas.width;
+    const height = canvas.height;
+    const data = audioBuffer.getChannelData(0);
+    const step = Math.ceil(data.length / width);
+    const amp = height / 2;
 
     ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = document.body.classList.contains('dark-theme') ? '#37474f' : '#e3f2fd';
+    ctx.fillRect(0, 0, width, height);
+    ctx.strokeStyle = '#0288d1';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, amp);
+
+    for (let i = 0; i < width; i++) {
+        let min = 1.0;
+        let max = -1.0;
+        for (let j = 0; j < step; j++) {
+            const datum = data[i * step + j];
+            if (datum < min) min = datum;
+            if (datum > max) max = datum;
+        }
+        ctx.lineTo(i, (1 + min) * amp);
+        ctx.lineTo(i, (1 + max) * amp);
+    }
+
+    ctx.stroke();
+}
+
+function visualizeAudio(file) {
+    const audioPreview = document.getElementById('audioPreview');
+    const waveformCanvas = document.getElementById('waveformCanvas');
+    audioPreview.src = URL.createObjectURL(file);
+    audioPreview.style.display = 'block';
+    waveformCanvas.style.display = 'block';
 
     const audioContext = new (window.AudioContext || window.webkitAudioContext)();
     const reader = new FileReader();
-
-    reader.onload = function (e) {
+    reader.onload = function(e) {
         audioContext.decodeAudioData(e.target.result, (buffer) => {
-            const data = buffer.getChannelData(0);
-            const step = Math.ceil(data.length / width);
-            const amp = height / 2;
-
-            // Draw center line
-            ctx.strokeStyle = isDark ? 'rgba(148,163,184,0.15)' : 'rgba(0,0,0,0.06)';
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(0, amp);
-            ctx.lineTo(width, amp);
-            ctx.stroke();
-
-            // Draw waveform
-            ctx.strokeStyle = '#6366f1';
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.moveTo(0, amp);
-
-            for (let i = 0; i < width; i++) {
-                let min = 1.0, max = -1.0;
-                for (let j = 0; j < step; j++) {
-                    const d = data[i * step + j];
-                    if (d !== undefined) {
-                        if (d < min) min = d;
-                        if (d > max) max = d;
-                    }
-                }
-                ctx.lineTo(i, (1 + min) * amp);
-                ctx.lineTo(i, (1 + max) * amp);
-            }
-            ctx.stroke();
-
-            audioContext.close();
-        }).catch(() => {
-            audioContext.close(); // always close to avoid AudioContext leak
+            drawWaveform(buffer);
+        }, (err) => {
+            showError('Failed to decode audio for visualization.', 'Ensure the audio file is not corrupted.');
         });
+    };
+    reader.onerror = () => {
+        showError('Failed to read audio file for visualization.', 'Try a different audio file.');
     };
     reader.readAsArrayBuffer(file);
 }
 
-// ==================== Chart ====================
-let probabilityChart = null;
-let lastProbabilities = null;  // kept so chart can be re-themed on theme toggle
-
-function displayChart(probabilities) {
-    lastProbabilities = probabilities;
+function displayProbabilitiesChart(probabilities) {
     const ctx = document.getElementById('probabilitiesChart');
-    if (!ctx || !window.Chart) return;
+    if (!ctx || !window.Chart) {
+        console.error('Chart.js not loaded or canvas not found');
+        showError('Unable to display probability chart.', 'Ensure Chart.js is loaded.');
+        return;
+    }
+    const chartContext = ctx.getContext('2d');
+    if (window.probabilityChart) {
+        window.probabilityChart.destroy();
+    }
 
-    if (probabilityChart) probabilityChart.destroy();
+    const emotionColors = {
+        'angry': '#ef5350',
+        'calm': '#26a69a',
+        'disgust': '#ab47bc',
+        'fear': '#42a5f5',
+        'happy': '#66bb6a',
+        'neutral': '#90a4ae',
+        'surprise': '#ffca28',
+        'sad': '#ff8f00'
+    };
 
-    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
     const labels = Object.keys(probabilities);
-    const values = Object.values(probabilities).map(v => (v * 100));
-    const colors = labels.map(l => EMOTION_COLORS[l] || '#94a3b8');
+    const bgColors = labels.map(l => emotionColors[l] || '#d3d3d3');
 
-    probabilityChart = new Chart(ctx.getContext('2d'), {
+    window.probabilityChart = new Chart(chartContext, {
         type: 'bar',
         data: {
-            labels: labels.map(l => l.charAt(0).toUpperCase() + l.slice(1)),
+            labels: labels,
             datasets: [{
-                data: values,
-                backgroundColor: colors.map(c => c + '33'),
-                borderColor: colors,
-                borderWidth: 2,
-                borderRadius: 6,
-                borderSkipped: false
+                label: 'Emotion Probabilities',
+                data: Object.values(probabilities).map(v => (v * 100).toFixed(2)),
+                backgroundColor: bgColors,
+                borderColor: bgColors,
+                borderWidth: 1,
+                borderRadius: 5
             }]
         },
         options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false },
-                tooltip: {
-                    callbacks: {
-                        label: (ctx) => `${ctx.parsed.y.toFixed(1)}%`
-                    }
-                }
+            animation: {
+                duration: 1500,
+                easing: 'easeOutQuart'
             },
             scales: {
                 y: {
                     beginAtZero: true,
                     max: 100,
-                    grid: { color: isDark ? 'rgba(148,163,184,0.1)' : 'rgba(0,0,0,0.06)' },
-                    ticks: {
-                        color: isDark ? '#94a3b8' : '#64748b',
-                        callback: v => v + '%'
+                    grid: { color: document.body.classList.contains('dark-theme') ? '#546e7a' : '#e0e0e0' },
+                    ticks: { color: document.body.classList.contains('dark-theme') ? '#eceff1' : '#212121' },
+                    title: {
+                        display: true,
+                        text: 'Probability (%)',
+                        color: document.body.classList.contains('dark-theme') ? '#eceff1' : '#212121',
+                        font: { size: 14, weight: '500' }
                     }
                 },
                 x: {
                     grid: { display: false },
-                    ticks: { color: isDark ? '#94a3b8' : '#64748b', font: { size: 11 } }
+                    ticks: { color: document.body.classList.contains('dark-theme') ? '#eceff1' : '#212121' },
+                    title: {
+                        display: true,
+                        text: 'Emotions',
+                        color: document.body.classList.contains('dark-theme') ? '#eceff1' : '#212121',
+                        font: { size: 14, weight: '500' }
+                    }
+                }
+            },
+            plugins: {
+                legend: {
+                    labels: {
+                        color: document.body.classList.contains('dark-theme') ? '#eceff1' : '#212121',
+                        font: { size: 14 }
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: (context) => `${context.dataset.label}: ${context.raw}%`
+                    }
                 }
             }
         }
     });
 }
 
-// ==================== Prediction ====================
 async function predictEmotion() {
+    console.log('predictEmotion called');
     const fileInput = document.getElementById('audioFile');
-    const predictBtn = document.getElementById('predictButton');
-    const progress = document.getElementById('progressIndicator');
+    const predictButton = document.getElementById('predictButton');
+    const emojiDiv = document.getElementById('emoji');
+    const captionP = document.getElementById('caption');
+    const confidenceP = document.getElementById('confidence');
+    const progressIndicator = document.getElementById('progressIndicator');
     const progressText = document.getElementById('progressText');
-    const resultPlaceholder = document.getElementById('resultPlaceholder');
-    const resultContent = document.getElementById('resultContent');
+    const predictionDetails = document.getElementById('predictionDetails');
+    const featureExtractionTimeP = document.getElementById('featureExtractionTime');
+    const predictionTimeP = document.getElementById('predictionTime');
 
     if (!fileInput.files.length) {
-        showToast('Please select an audio file first.');
+        showError('Please select an audio file.', 'Choose a .wav, .mp3, or .flac file to proceed.');
         return;
     }
 
-    // UI: Loading state
-    predictBtn.disabled = true;
-    predictBtn.innerHTML = `
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spin">
-            <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
-        </svg>
-        Analyzing...`;
-    progress.classList.remove('hidden');
-    progressText.textContent = 'Uploading and processing audio...';
-    resultPlaceholder.classList.add('hidden');
-    resultContent.classList.add('hidden');
+    predictButton.disabled = true;
+    predictButton.textContent = 'Predicting...';
+    emojiDiv.textContent = '⏳';
+    captionP.textContent = 'Processing audio...';
+    confidenceP.textContent = '';
+    progressIndicator.classList.remove('hidden');
+    predictionDetails.classList.add('hidden');
 
     const formData = new FormData();
     formData.append('file', fileInput.files[0]);
-    const startTime = performance.now();
 
     try {
-        const response = await fetch('/upload', { method: 'POST', body: formData });
-        const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
+        progressText.textContent = 'Uploading & extracting features...';
+        const startTime = performance.now();
 
+        const response = await fetch('/upload', {
+            method: 'POST',
+            body: formData
+        });
+
+        const endTime = performance.now();
+        const totalTime = ((endTime - startTime) / 1000).toFixed(2);
+
+        console.log('Fetch response status:', response.status);
         if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.message || `Server error (${response.status})`);
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.message || `HTTP error! Status: ${response.status}`);
         }
 
         const data = await response.json();
-        if (data.status === 'error') throw new Error(data.message);
+        console.log('Fetch response data:', data);
+        if (data.status === 'error') {
+            throw new Error(data.message);
+        }
 
         const { predicted_emotion, probabilities, confidence, is_uncertain } = data.data;
 
-        // Update emotion badge
-        document.getElementById('emoji').textContent = EMOJI_MAP[predicted_emotion] || '?';
-        document.getElementById('emotionLabel').textContent = predicted_emotion;
-        document.getElementById('caption').textContent =
-            is_uncertain ? `Possibly ${CAPTION_MAP[predicted_emotion] || 'Unknown'} (low confidence)`
-                         : CAPTION_MAP[predicted_emotion] || predicted_emotion;
+        emojiDiv.textContent = emojiMap[predicted_emotion] || '❓';
 
-        // Update confidence meter
-        const confPct = (confidence * 100).toFixed(1);
-        document.getElementById('confidenceValue').textContent = confPct + '%';
-        const confFill = document.getElementById('confidenceFill');
-        confFill.style.width = confPct + '%';
-        confFill.className = 'confidence-fill' +
-            (confidence >= 0.7 ? '' : confidence >= 0.4 ? ' medium' : ' low');
+        if (is_uncertain) {
+            captionP.textContent = `Possibly ${captionMap[predicted_emotion] || 'Unknown'} (Low confidence)`;
+            captionP.style.opacity = '0.7';
+        } else {
+            captionP.textContent = captionMap[predicted_emotion] || 'Unknown emotion';
+            captionP.style.opacity = '1';
+        }
 
-        const warning = document.getElementById('uncertaintyWarning');
-        if (is_uncertain) warning.classList.remove('hidden');
-        else warning.classList.add('hidden');
+        confidenceP.textContent = `Confidence: ${(confidence * 100).toFixed(2)}%${is_uncertain ? ' ⚠️' : ''}`;
+        displayProbabilitiesChart(probabilities);
 
-        // Chart
-        displayChart(probabilities);
+        featureExtractionTimeP.textContent = `Total processing time: ${totalTime} seconds`;
+        predictionTimeP.textContent = is_uncertain
+            ? '⚠️ Low confidence - the audio may not contain clear emotional speech.'
+            : '';
+        predictionDetails.classList.remove('hidden');
 
-        // Timing
-        document.getElementById('processingTime').textContent =
-            `Processed in ${totalTime}s`;
-
-        // Show results
-        resultContent.classList.remove('hidden');
-
-        // Brief success feedback
-        showToast(
-            `Detected: ${predicted_emotion} (${confPct}%)`,
-            is_uncertain ? 'warning' : 'success'
-        );
-
-        // Refresh history
-        updateHistory();
-
+        updatePreviousPredictions();
     } catch (error) {
-        showToast(error.message);
-        resultPlaceholder.classList.remove('hidden');
+        console.error('Fetch error:', error);
+        showError(error.message, 'Please try again or check your audio file.');
+        emojiDiv.textContent = '❌';
+        captionP.textContent = 'Prediction failed';
+        confidenceP.textContent = `Error: ${error.message}`;
     } finally {
-        predictBtn.disabled = false;
-        predictBtn.innerHTML = `
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polygon points="5 3 19 12 5 21 5 3"/>
-            </svg>
-            Analyze Emotion`;
-        progress.classList.add('hidden');
+        predictButton.disabled = false;
+        predictButton.textContent = 'Upload & Predict';
+        progressIndicator.classList.add('hidden');
     }
 }
 
-// ==================== History ====================
-function updateHistory() {
-    const tbody = document.getElementById('predictionsBody');
-
+function updatePreviousPredictions() {
+    console.log('updatePreviousPredictions called');
+    const tableBody = document.getElementById('predictionsBody');
     fetch('/predictions')
-        .then(r => r.json())
-        .then(data => {
-            if (data.status !== 'success' || !data.data.length) {
-                tbody.innerHTML = '<tr><td colspan="4" class="empty-state">No predictions yet</td></tr>';
-                return;
+        .then(response => {
+            console.log('Predictions fetch status:', response.status);
+            if (!response.ok) {
+                throw new Error(`HTTP error! Status: ${response.status}`);
             }
-
-            tbody.innerHTML = data.data.slice(0, 10).map(pred => {
-                const name = pred.filename || 'Unknown';
-                const emotion = pred.predicted_emotion || 'Unknown';
-                const conf = pred.confidence != null ? (pred.confidence * 100).toFixed(1) : 'N/A';
-                const confClass = pred.confidence >= 0.7 ? 'high' : pred.confidence >= 0.4 ? 'medium' : 'low';
-                const emoji = EMOJI_MAP[emotion] || '';
-                const ts = pred.timestamp || '';
-                const uncertain = pred.is_uncertain ? ' *' : '';
-
-                return `<tr>
-                    <td title="${name}">${name.length > 25 ? name.slice(0, 22) + '...' : name}</td>
-                    <td><span class="emotion-tag">${emoji} ${emotion}${uncertain}</span></td>
-                    <td><span class="confidence-tag ${confClass}">${conf}%</span></td>
-                    <td>${ts}</td>
-                </tr>`;
-            }).join('');
+            return response.json();
         })
-        .catch(() => {
-            tbody.innerHTML = '<tr><td colspan="4" class="empty-state">Failed to load history</td></tr>';
+        .then(data => {
+            console.log('Predictions data:', data);
+            tableBody.innerHTML = '';
+            if (data.status === 'error') {
+                throw new Error(data.message);
+            }
+            // FIX: data.data is already newest-first from the server.
+            // Do NOT reverse again. Take the first 10.
+            data.data.slice(0, 10).forEach(pred => {
+                const row = document.createElement('tr');
+                // FIX: Use 'filename' field (matches app.py save_prediction).
+                // Fall back to 'audio_file' or 'file' for old prediction entries.
+                const fileName = pred.filename || pred.audio_file || pred.file || 'Unknown';
+                const emotion = pred.predicted_emotion || pred.emotion || 'Unknown';
+                const conf = pred.confidence != null ? (pred.confidence * 100).toFixed(2) + '%' : 'N/A';
+                const uncertain = pred.is_uncertain ? ' ⚠️' : '';
+                const timestamp = pred.timestamp || '';
+
+                row.innerHTML = `
+                    <td>${fileName}</td>
+                    <td>${emotion}${uncertain}</td>
+                    <td>${conf}</td>
+                    <td>${timestamp}</td>
+                `;
+                tableBody.appendChild(row);
+            });
+        })
+        .catch(error => {
+            console.error('Error loading previous predictions:', error);
+            tableBody.innerHTML = '<tr><td colspan="4">Failed to load predictions</td></tr>';
         });
 }
 
-// ==================== Drag & Drop ====================
 function setupDragAndDrop() {
+    console.log('setupDragAndDrop called');
     const dropZone = document.getElementById('dropZone');
     const fileInput = document.getElementById('audioFile');
-
-    dropZone.addEventListener('click', () => fileInput.click());
-
-    // Keyboard: activate on Enter or Space for accessibility
-    dropZone.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            fileInput.click();
-        }
-    });
 
     dropZone.addEventListener('dragover', (e) => {
         e.preventDefault();
@@ -375,26 +330,39 @@ function setupDragAndDrop() {
     dropZone.addEventListener('drop', (e) => {
         e.preventDefault();
         dropZone.classList.remove('dragover');
-        if (e.dataTransfer.files.length) {
-            fileInput.files = e.dataTransfer.files;
-            handleFileSelected(e.dataTransfer.files[0]);
+        const files = e.dataTransfer.files;
+        if (files.length) {
+            fileInput.files = files;
+            visualizeAudio(files[0]);
         }
     });
 
     fileInput.addEventListener('change', () => {
         if (fileInput.files.length) {
-            handleFileSelected(fileInput.files[0]);
+            visualizeAudio(fileInput.files[0]);
         }
     });
-
-    document.getElementById('clearFile').addEventListener('click', clearFile);
 }
 
-// ==================== Init ====================
 document.addEventListener('DOMContentLoaded', () => {
-    initTheme();
+    console.log('DOM loaded, setting up drag-and-drop, theme, and predictions');
     setupDragAndDrop();
-    updateHistory();
+    updatePreviousPredictions();
 
-    document.getElementById('themeToggle').addEventListener('click', toggleTheme);
+    const savedTheme = localStorage.getItem('theme') || 'light';
+    if (savedTheme === 'dark') {
+        document.body.classList.add('dark-theme');
+        document.getElementById('themeToggle').querySelector('.theme-icon').textContent = '☀️';
+    }
+
+    document.getElementById('themeToggle').addEventListener('click', () => {
+        toggleTheme();
+        document.body.dispatchEvent(new Event('themeChange'));
+    });
+
+    document.getElementById('audioFile').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            predictEmotion();
+        }
+    });
 });

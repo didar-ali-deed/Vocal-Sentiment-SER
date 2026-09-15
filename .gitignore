@@ -5,22 +5,24 @@ __pycache__/
 *.pyo
 *.pyd
 *.ipynb_checkpoints/
-*.csv
-*.json
-
 
 # Virtual env
 .venv/
+venv/
 .env
-.claude/
-
-
+.vscode/
 
 # Data
-data/**/*.wav
-
+data/
+Preprocessed Data/combined_data.csv
+Extracted Features/combined_wav2vec_features.csv
+Extracted Features/
+deployment/
 *.csv
 *.wav
+results/inference_predictions.json
+Preprocessed Data/*distribution.png
+results/*confusion_matrix_normalized.png
 
 # Models
 models/
@@ -33,5 +35,3 @@ models/
 Thumbs.db
 # Ignore specific training script
 train_emotion_classifier_copy_T.py
-
-
