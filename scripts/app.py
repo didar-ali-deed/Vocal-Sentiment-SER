@@ -79,7 +79,14 @@ def get_runtime():
 # ==================== Audio Preprocessing ====================
 def preprocess_audio(file_path, target_sr=TARGET_SAMPLE_RATE):
     """Load, normalize, trim, and validate an audio file."""
-    audio, _ = librosa.load(file_path, sr=target_sr, mono=True)
+    try:
+        audio, _ = librosa.load(file_path, sr=target_sr, mono=True)
+    except Exception as error:
+        logger.warning("Unable to decode uploaded audio %s: %s", file_path, error)
+        raise ValueError(
+            "This audio file could not be decoded. Try exporting it again as a "
+            "standard WAV, MP3, FLAC, or OGG file."
+        ) from error
     if len(audio) < target_sr * 0.1:
         raise ValueError("Audio is too short; upload a file longer than 0.1 seconds.")
 
