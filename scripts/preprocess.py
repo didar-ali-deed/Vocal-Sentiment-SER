@@ -14,11 +14,14 @@ import numpy as np
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# Resolve default paths from the project root.
+BASE_DIR = Path(__file__).resolve().parent.parent
+
 # Add argument parsing
 parser = argparse.ArgumentParser(description="Preprocess TESS and RAVDESS datasets.")
-parser.add_argument("--tess_path", type=str, default="../data/tess/TESS Toronto emotional speech set data/", help="Path to TESS dataset")
-parser.add_argument("--ravdess_path", type=str, default="../data/ravdess/", help="Path to RAVDESS dataset")
-parser.add_argument("--output_dir", type=str, default="../Preprocessed Data/", help="Output directory for preprocessed data")
+parser.add_argument("--tess_path", type=str, default=str(BASE_DIR / "data" / "tess"), help="Path to TESS dataset")
+parser.add_argument("--ravdess_path", type=str, default=str(BASE_DIR / "data" / "ravdess"), help="Path to RAVDESS dataset")
+parser.add_argument("--output_dir", type=str, default=str(BASE_DIR / "preprocessed_data"), help="Output directory for preprocessed data")
 parser.add_argument("--add_noise", action="store_true", help="Add noise to audio files during preprocessing")
 parser.add_argument("--noise_level", type=float, default=0.005, help="Level of noise to add (default: 0.005)")
 args = parser.parse_args()
@@ -139,7 +142,10 @@ def process_file(file, dataset_name, emotion_map, add_noise_flag=False, noise_le
         duration = librosa.get_duration(y=y, sr=sr)
         sample_rate, num_samples = sr, len(y)
 
-        return emotion, str(file), duration, dataset_name, sample_rate, num_samples
+        resolved = file.resolve()
+        stored_path = (resolved.relative_to(BASE_DIR).as_posix()
+                       if resolved.is_relative_to(BASE_DIR) else str(resolved))
+        return emotion, stored_path, duration, dataset_name, sample_rate, num_samples
     except Exception as e:
         logging.error(f"Error processing file {file}: {e}")
         return None

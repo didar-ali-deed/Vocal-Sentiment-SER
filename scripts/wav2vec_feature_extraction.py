@@ -18,10 +18,13 @@ warnings.filterwarnings("ignore", category=UserWarning)
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# Resolve defaults and metadata audio paths from the project root.
+BASE_DIR = Path(__file__).resolve().parent.parent
+
 # Add argument parsing
 parser = argparse.ArgumentParser(description="Extract Wav2Vec2 features from audio files.")
-parser.add_argument("--input_path", type=str, default="../Preprocessed Data/combined_data.csv", help="Path to the input CSV file")
-parser.add_argument("--output_path", type=str, default="../Extracted Features/combined_wav2vec_features.csv", help="Path to save the extracted features")
+parser.add_argument("--input_path", type=str, default=str(BASE_DIR / "preprocessed_data" / "combined_data.csv"), help="Path to the input CSV file")
+parser.add_argument("--output_path", type=str, default=str(BASE_DIR / "extracted_features" / "combined_wav2vec_features.csv"), help="Path to save the extracted features")
 parser.add_argument("--batch_size", type=int, default=32, help="Batch size for feature extraction")
 args = parser.parse_args()
 
@@ -49,7 +52,10 @@ def extract_wav2vec_features(file_path):
     """
     try:
         # Load audio file and resample to 16kHz
-        audio, sr = librosa.load(file_path, sr=16000)
+        audio_path = Path(file_path)
+        if not audio_path.is_absolute():
+            audio_path = BASE_DIR / audio_path
+        audio, sr = librosa.load(audio_path, sr=16000)
         
         # Process audio with Wav2Vec2
         inputs = processor(audio, return_tensors="pt", sampling_rate=16000, padding=True)

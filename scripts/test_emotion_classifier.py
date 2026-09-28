@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -12,10 +13,11 @@ import logging
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Paths
-FEATURES_FILE = "../Extracted Features/combined_wav2vec_features.csv"
-MODEL_PATH = "../models/emotion_classifier/emotion_classifier.pth"
-RESULTS_DIR = "../results/"
+# Paths are anchored to the project, regardless of the working directory.
+BASE_DIR = Path(__file__).resolve().parent.parent
+FEATURES_FILE = BASE_DIR / "extracted_features" / "combined_wav2vec_features.csv"
+MODEL_PATH = BASE_DIR / "models" / "emotion_classifier" / "emotion_classifier.pth"
+RESULTS_DIR = BASE_DIR / "results"
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 # Dataset Class

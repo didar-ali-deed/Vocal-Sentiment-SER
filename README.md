@@ -104,7 +104,7 @@ changes; automatic reloading is disabled.
 The app requires these local files:
 
 - `models/emotion_classifier/emotion_classifier.pth`
-- `Extracted Features/combined_wav2vec_features.csv`
+- `extracted_features/combined_wav2vec_features.csv`
 
 The original trainer saves only the model weights. The app recovers class names
 in their original first-appearance order from the training feature CSV, using
@@ -140,23 +140,25 @@ Use this directory layout:
 ```text
 data/
   ravdess/
-    Actor_01/
+    actor_01/
     ...
   tess/
-    TESS Toronto emotional speech set data/
-      OAF_angry/
+    tess_toronto_emotional_speech_set_data/
+      oaf_angry/
       ...
 ```
 
-Run all pipeline commands from `scripts/`: their default paths and the saved
-audio paths are relative to that working directory. Folder names contain spaces.
+Run the pipeline from the project root. Default paths are anchored to the project
+folder, so running the scripts from `scripts/` also works. Project folders use
+lowercase `snake_case`. Metadata audio paths are relative to the project root;
+external dataset paths are stored as absolute paths. Explicit relative CLI paths
+are interpreted from your current working directory.
 
 ```powershell
-cd scripts
-python preprocess.py
-python wav2vec_feature_extraction.py
-python train_emotion_classifier.py
-python test_emotion_classifier.py
+python scripts/preprocess.py
+python scripts/wav2vec_feature_extraction.py
+python scripts/train_emotion_classifier.py
+python scripts/test_emotion_classifier.py
 ```
 
 Run each command after the previous command finishes. Plot windows may need to
@@ -186,7 +188,7 @@ as training augmentation.
 ## Project structure
 
 ```text
-SER_FYP/
+project_root/
   scripts/
     app.py
     model.py
@@ -201,8 +203,8 @@ SER_FYP/
       styles.css
       favicon.svg
   data/
-  Preprocessed Data/
-  Extracted Features/
+  preprocessed_data/
+  extracted_features/
   models/emotion_classifier/
   results/
   deployment/uploads/
@@ -228,8 +230,8 @@ Ignore rules do not remove files already tracked by Git.
 
 - **Missing model or labels (503):** restore the checkpoint and its original feature
   CSV at the paths above, or provide the matching `label_names.npy`.
-- **Pipeline cannot find files:** run the pipeline from `scripts/` and preserve the
-  folder names with spaces.
+- **Pipeline cannot find files:** check the lowercase folder layout above.
+  Regenerate metadata with `preprocess.py` after moving or renaming audio folders.
 - **Audio cannot be decoded:** export a standard WAV file and try again.
 - **Wav2Vec2 unused-weight messages:** the app loads the feature extractor rather
   than the pretraining heads. These messages alone do not mean prediction failed.

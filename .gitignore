@@ -25,31 +25,31 @@ htmlcov/
 !/data/**/*.[tT][iI][fF]
 !/data/**/*.[tT][iI][fF][fF]
 
-/Preprocessed Data/**
-!/Preprocessed Data/**/
-!/Preprocessed Data/**/*.md
-!/Preprocessed Data/**/*.[pP][nN][gG]
-!/Preprocessed Data/**/*.[jJ][pP][gG]
-!/Preprocessed Data/**/*.[jJ][pP][eE][gG]
-!/Preprocessed Data/**/*.[gG][iI][fF]
-!/Preprocessed Data/**/*.[sS][vV][gG]
-!/Preprocessed Data/**/*.[wW][eE][bB][pP]
-!/Preprocessed Data/**/*.[bB][mM][pP]
-!/Preprocessed Data/**/*.[tT][iI][fF]
-!/Preprocessed Data/**/*.[tT][iI][fF][fF]
+/preprocessed_data/**
+!/preprocessed_data/**/
+!/preprocessed_data/**/*.md
+!/preprocessed_data/**/*.[pP][nN][gG]
+!/preprocessed_data/**/*.[jJ][pP][gG]
+!/preprocessed_data/**/*.[jJ][pP][eE][gG]
+!/preprocessed_data/**/*.[gG][iI][fF]
+!/preprocessed_data/**/*.[sS][vV][gG]
+!/preprocessed_data/**/*.[wW][eE][bB][pP]
+!/preprocessed_data/**/*.[bB][mM][pP]
+!/preprocessed_data/**/*.[tT][iI][fF]
+!/preprocessed_data/**/*.[tT][iI][fF][fF]
 
-/Extracted Features/**
-!/Extracted Features/**/
-!/Extracted Features/**/*.md
-!/Extracted Features/**/*.[pP][nN][gG]
-!/Extracted Features/**/*.[jJ][pP][gG]
-!/Extracted Features/**/*.[jJ][pP][eE][gG]
-!/Extracted Features/**/*.[gG][iI][fF]
-!/Extracted Features/**/*.[sS][vV][gG]
-!/Extracted Features/**/*.[wW][eE][bB][pP]
-!/Extracted Features/**/*.[bB][mM][pP]
-!/Extracted Features/**/*.[tT][iI][fF]
-!/Extracted Features/**/*.[tT][iI][fF][fF]
+/extracted_features/**
+!/extracted_features/**/
+!/extracted_features/**/*.md
+!/extracted_features/**/*.[pP][nN][gG]
+!/extracted_features/**/*.[jJ][pP][gG]
+!/extracted_features/**/*.[jJ][pP][eE][gG]
+!/extracted_features/**/*.[gG][iI][fF]
+!/extracted_features/**/*.[sS][vV][gG]
+!/extracted_features/**/*.[wW][eE][bB][pP]
+!/extracted_features/**/*.[bB][mM][pP]
+!/extracted_features/**/*.[tT][iI][fF]
+!/extracted_features/**/*.[tT][iI][fF][fF]
 
 /models/**
 !/models/**/

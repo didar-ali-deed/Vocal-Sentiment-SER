@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -7,10 +8,11 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 import matplotlib.pyplot as plt
 
-# Paths
-FEATURES_FILE = "../Extracted Features/combined_wav2vec_features.csv"
-OUTPUT_MODEL_DIR = "../models/emotion_classifier/"
-RESULTS_DIR = "../results/"
+# Paths are anchored to the project, regardless of the working directory.
+BASE_DIR = Path(__file__).resolve().parent.parent
+FEATURES_FILE = BASE_DIR / "extracted_features" / "combined_wav2vec_features.csv"
+OUTPUT_MODEL_DIR = BASE_DIR / "models" / "emotion_classifier"
+RESULTS_DIR = BASE_DIR / "results"
 os.makedirs(OUTPUT_MODEL_DIR, exist_ok=True)
 os.makedirs(RESULTS_DIR, exist_ok=True)
 

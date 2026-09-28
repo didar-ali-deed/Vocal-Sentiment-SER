@@ -40,7 +40,7 @@ def load_artifacts(model_dir: Path, device: torch.device):
     if labels_path.exists():
         label_names = np.load(labels_path, allow_pickle=False)
     else:
-        features_path = model_dir.parent.parent / "Extracted Features" / "combined_wav2vec_features.csv"
+        features_path = model_dir.parent.parent / "extracted_features" / "combined_wav2vec_features.csv"
         if not features_path.exists():
             raise FileNotFoundError(
                 "Label mapping unavailable. Restore the original training feature CSV "
