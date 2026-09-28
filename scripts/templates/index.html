@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#f4f6f8">
+    <meta name="description" content="VocalSense — a Wav2Vec2 speech emotion recognition demo.">
+    <title>VocalSense — Speech Emotion Recognition</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/professional.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+</head>
+<body>
+    <div class="page-shell">
+        <header class="topbar">
+            <a class="brand" href="/" aria-label="VocalSense home">
+                <span class="brand-mark">VS</span>
+                <span>VocalSense <span class="brand-subtitle">speech intelligence</span></span>
+            </a>
+            <div class="topbar-actions">
+                <span class="system-status"><span class="status-dot"></span> local inference</span>
+                <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch to dark theme">
+                    <span class="theme-icon" aria-hidden="true">◐</span>
+                </button>
+            </div>
+        </header>
+
+        <main class="app-main">
+            <section class="hero-intro" aria-labelledby="page-title">
+                <div class="eyebrow">WAV2VEC2 · TRANSFORMER INFERENCE</div>
+                <h1 id="page-title">Read the feeling<br><span>behind the voice.</span></h1>
+                <p>Upload a short recording and explore the emotional signal in speech. A focused interface for fast, transparent model feedback.</p>
+                <div class="hero-stats" aria-label="Model capabilities">
+                    <span class="hero-stat"><strong>08</strong> emotion classes</span>
+                    <span class="hero-stat"><strong>16kHz</strong> audio input</span>
+                    <span class="hero-stat"><strong>30s</strong> max duration</span>
+                </div>
+            </section>
+
+            <section class="workspace-grid" aria-label="Speech analysis workspace">
+                <section class="panel upload-section" aria-labelledby="upload-title">
+                    <div class="panel-heading">
+                        <div><div class="section-kicker">01 / INPUT</div><h2 id="upload-title">Upload a recording</h2></div>
+                        <span class="limit-badge">MAX 30 SEC</span>
+                    </div>
+                    <div class="upload-container" id="dropZone" role="button" tabindex="0" aria-label="Choose an audio recording">
+                        <div class="drop-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 16V4m0 0L8 8m4-4 4 4M5 14.5v2.25A2.25 2.25 0 0 0 7.25 19h9.5A2.25 2.25 0 0 0 19 16.75V14.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        </div>
+                        <div class="drop-copy"><strong id="filePrompt">Drop audio here</strong><span>or browse from your device</span></div>
+                        <span class="file-meta" id="fileMeta">WAV, MP3, FLAC or OGG · up to 10 MB</span>
+                        <input type="file" id="audioFile" accept=".wav,.mp3,.flac,.ogg" aria-label="Audio file">
+                    </div>
+                    <div class="preview-wrap">
+                        <audio id="audioPreview" class="hidden" controls aria-label="Audio preview"></audio>
+                        <canvas id="waveformCanvas" class="hidden" aria-label="Audio waveform"></canvas>
+                    </div>
+                    <button id="predictButton" class="predict-button" type="button">
+                        <span class="button-label">Analyze emotion</span><span class="button-icon" aria-hidden="true">→</span>
+                    </button>
+                    <div id="progressIndicator" class="progress-indicator hidden" aria-live="polite"><span class="loader"></span><span id="progressText">Preparing analysis…</span></div>
+                    <div class="privacy-note"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6l-7-3Z"/><path d="m9.5 12 1.7 1.7 3.5-3.5"/></svg> Audio is processed locally and removed after inference.</div>
+                </section>
+
+                <section class="panel prediction-section" aria-labelledby="result-title">
+                    <div class="panel-heading">
+                        <div><div class="section-kicker">02 / SIGNAL</div><h2 id="result-title">Prediction result</h2></div>
+                        <span id="resultStatus" class="result-status ready">READY</span>
+                    </div>
+                    <div class="prediction-result">
+                        <div class="result-hero">
+                            <div id="emoji" class="emotion-orb" aria-hidden="true">·</div>
+                            <div><span class="result-label">Dominant emotion</span><p id="caption" class="caption">Waiting for audio</p><p id="confidence" class="confidence">Upload a recording to begin</p></div>
+                        </div>
+                        <div id="predictionDetails" class="prediction-details hidden">
+                            <h3>Probability distribution</h3>
+                            <p id="featureExtractionTime"></p><p id="predictionTime"></p>
+                            <div style="height: 230px"><canvas id="probabilitiesChart" aria-label="Emotion probability chart"></canvas></div>
+                        </div>
+                    </div>
+                </section>
+            </section>
+
+            <section class="panel history-panel previous-predictions" aria-labelledby="history-title">
+                <div class="panel-heading history-heading"><div><div class="section-kicker">03 / HISTORY</div><h2 id="history-title">Recent analyses</h2></div><span class="limit-badge">LAST 10</span></div>
+                <div class="history-scroll"><table><thead><tr><th>File name</th><th>Emotion</th><th>Confidence</th><th>Timestamp</th></tr></thead><tbody id="predictionsBody"><tr><td colspan="4" class="empty-history">Loading recent analyses…</td></tr></tbody></table></div>
+            </section>
+        </main>
+
+        <footer class="site-footer"><span>VocalSense · speech emotion recognition</span><span><strong>LOCAL</strong> · Wav2Vec2 inference</span></footer>
+    </div>
+    <noscript><div style="padding:24px;text-align:center">JavaScript is required to use this application.</div></noscript>
+    <script src="/static/professional.js"></script>
+</body>
+</html>
