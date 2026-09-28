@@ -10,12 +10,72 @@ __pycache__/
 .coverage
 htmlcov/
 
-# Local datasets and generated training artifacts
-/data/
-/Preprocessed Data/
-/Extracted Features/
-/models/
-/results/
+# Keep folder documentation and images; ignore other local artifacts.
+
+/data/**
+!/data/**/
+!/data/**/*.md
+!/data/**/*.[pP][nN][gG]
+!/data/**/*.[jJ][pP][gG]
+!/data/**/*.[jJ][pP][eE][gG]
+!/data/**/*.[gG][iI][fF]
+!/data/**/*.[sS][vV][gG]
+!/data/**/*.[wW][eE][bB][pP]
+!/data/**/*.[bB][mM][pP]
+!/data/**/*.[tT][iI][fF]
+!/data/**/*.[tT][iI][fF][fF]
+
+/Preprocessed Data/**
+!/Preprocessed Data/**/
+!/Preprocessed Data/**/*.md
+!/Preprocessed Data/**/*.[pP][nN][gG]
+!/Preprocessed Data/**/*.[jJ][pP][gG]
+!/Preprocessed Data/**/*.[jJ][pP][eE][gG]
+!/Preprocessed Data/**/*.[gG][iI][fF]
+!/Preprocessed Data/**/*.[sS][vV][gG]
+!/Preprocessed Data/**/*.[wW][eE][bB][pP]
+!/Preprocessed Data/**/*.[bB][mM][pP]
+!/Preprocessed Data/**/*.[tT][iI][fF]
+!/Preprocessed Data/**/*.[tT][iI][fF][fF]
+
+/Extracted Features/**
+!/Extracted Features/**/
+!/Extracted Features/**/*.md
+!/Extracted Features/**/*.[pP][nN][gG]
+!/Extracted Features/**/*.[jJ][pP][gG]
+!/Extracted Features/**/*.[jJ][pP][eE][gG]
+!/Extracted Features/**/*.[gG][iI][fF]
+!/Extracted Features/**/*.[sS][vV][gG]
+!/Extracted Features/**/*.[wW][eE][bB][pP]
+!/Extracted Features/**/*.[bB][mM][pP]
+!/Extracted Features/**/*.[tT][iI][fF]
+!/Extracted Features/**/*.[tT][iI][fF][fF]
+
+/models/**
+!/models/**/
+!/models/**/*.md
+!/models/**/*.[pP][nN][gG]
+!/models/**/*.[jJ][pP][gG]
+!/models/**/*.[jJ][pP][eE][gG]
+!/models/**/*.[gG][iI][fF]
+!/models/**/*.[sS][vV][gG]
+!/models/**/*.[wW][eE][bB][pP]
+!/models/**/*.[bB][mM][pP]
+!/models/**/*.[tT][iI][fF]
+!/models/**/*.[tT][iI][fF][fF]
+
+/results/**
+!/results/**/
+!/results/**/*.md
+!/results/**/*.[pP][nN][gG]
+!/results/**/*.[jJ][pP][gG]
+!/results/**/*.[jJ][pP][eE][gG]
+!/results/**/*.[gG][iI][fF]
+!/results/**/*.[sS][vV][gG]
+!/results/**/*.[wW][eE][bB][pP]
+!/results/**/*.[bB][mM][pP]
+!/results/**/*.[tT][iI][fF]
+!/results/**/*.[tT][iI][fF][fF]
 
 # Runtime uploads and logs
 /deployment/uploads/

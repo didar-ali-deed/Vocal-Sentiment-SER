@@ -146,9 +146,11 @@ active frontend script.
 
 ## Git and local artifacts
 
-`.gitignore` excludes virtual environments, Python caches, datasets, generated
-features/models/results, temporary uploads, logs, and local configuration.
-These files remain on disk but are not included in new commits. A fresh clone
+`.gitignore` includes images and Markdown documentation in the data, preprocessing,
+feature, model, and result folders. Short README files preserve the folder layout
+in Git. Audio, CSVs, model binaries, runtime history, virtual environments, caches,
+uploads, logs, and local configuration remain ignored.
+Ignored files remain on disk but are not included in new commits. A fresh clone
 must restore the matching model and features or run the pipeline before inference.
 Ignore rules do not remove files already tracked by Git.
 
